@@ -32,6 +32,6 @@ depois rodar o script python (grafico_omp.py)
 
 python3 grafico_omp.py
 
-(esse script além executar o código usando o as configurações do open mp com static, 1 e 120, dynamic 1 e 120 e guided, mas também vai pegar a execução do mandelbrot.cpp para juntar nos gráficos)
+(esse script além executar o código usando o as configurações do open mp com static, 1 e 120, dynamic 1 e 120 e guided, mas também vai pegar a execução do mandelbrot.cpp (resultados_mandelbrot.csv) para juntar nos gráficos)
 
 Por fim vai ter um gráfico comparando 6 execuções e o ideal.
