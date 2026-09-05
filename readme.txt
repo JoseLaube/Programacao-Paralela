@@ -1,5 +1,6 @@
 Trabalho Mandelbrot - José e Andre Fidelis
 
+##Mandelbrot Pthreads
 A execução do código deve ser feita da seguinte maneira:
 
 Compilar o mandelbrot.cpp com o seguinte comando:
@@ -21,3 +22,16 @@ A máquina também possuí 16Gb de ram;
 
 por fim os resultados estão apresentados no grafico_aceleracao.png, por curiosidade também tem o tempo que a 10 primeira execuções levaram e o que as 10 últimas levaram (1_thread.pgn, 24_threads.pgn).
 
+##Mandelbrot OpenMP
+
+Compilar o mandelbrotOmp.cpp com o seguinte comando
+
+g++ -02 -fopenmp mandelbrotOmp.cpp -o saida
+
+depois rodar o script python (grafico_omp.py)
+
+python3 grafico_omp.py
+
+(esse script além executar o código usando o as configurações do open mp com static, 1 e 120, dynamic 1 e 120 e guided, mas também vai pegar a execução do mandelbrot.cpp para juntar nos gráficos)
+
+Por fim vai ter um gráfico comparando 6 execuções e o ideal.
