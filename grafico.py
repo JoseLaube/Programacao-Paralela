@@ -1,7 +1,11 @@
-import subprocess
-import time
-import csv
-import matplotlib.pyplot as plt
+"""Benchmark de speedup do Mandelbrot com pthreads.
+
+Compile antes com `make mandelbrot` e execute com `python3 grafico.py`.
+"""
+
+import argparse
+
+import benchmark
 
 # Configuração do Mandelbrot
 MAX_ROW = 2300
@@ -13,185 +17,56 @@ MIN_THREADS = 1
 MAX_THREADS = 24
 REPETITIONS = 10
 
-# Nome do executável
 EXECUTABLE = "./mandelbrot"
+CSV_FILE = "resultados_mandelbrot.csv"
+PLOT_FILE = "grafico_aceleracao.png"
 
 
-def run_program(num_threads):
-    """
-    Executa o Mandelbrot uma vez e retorna o tempo de execução em segundos.
-    """
-
-    input_data = (
-        f"{MAX_ROW}\n"
-        f"{MAX_COLUMN}\n"
-        f"{MAX_N}\n"
-        f"{num_threads}\n"
+def run(num_threads):
+    return benchmark.run_once(
+        EXECUTABLE,
+        [MAX_ROW, MAX_COLUMN, MAX_N, num_threads],
     )
-
-    start = time.perf_counter()
-
-    subprocess.run(
-        [EXECUTABLE],
-        input=input_data,
-        text=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        check=True
-    )
-
-    end = time.perf_counter()
-
-    return end - start
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--no-show",
+        action="store_true",
+        help="salva o gráfico sem abrir a janela do matplotlib",
+    )
+    args = parser.parse_args()
 
-    results = {}
+    thread_counts = list(range(MIN_THREADS, MAX_THREADS + 1))
 
-    total_runs = (
-        (MAX_THREADS - MIN_THREADS + 1)
-        * REPETITIONS
+    print(f"Matriz: {MAX_ROW} x {MAX_COLUMN}")
+    print(f"Máximo de iterações: {MAX_N}")
+    print(f"Threads: {MIN_THREADS} até {MAX_THREADS}")
+    print(f"Repetições por número de threads: {REPETITIONS}")
+
+    results = benchmark.sweep(
+        "BENCHMARK MANDELBROT - PTHREADS",
+        thread_counts,
+        REPETITIONS,
+        run,
     )
 
-    current_run = 0
+    # O speedup usa a execução com 1 thread como referência.
+    benchmark.add_speedup(results, results[MIN_THREADS]["average"])
 
-    print("Iniciando benchmark...")
-    print(f"Total de execuções: {total_runs}")
-    print()
+    benchmark.print_table("Pthreads", results)
+    benchmark.save_csv(CSV_FILE, results)
 
-    for num_threads in range(MIN_THREADS, MAX_THREADS + 1):
+    speedups = [results[t]["speedup"] for t in thread_counts]
 
-        times = []
-
-        print(f"===== {num_threads} thread(s) =====")
-
-        for repetition in range(1, REPETITIONS + 1):
-
-            current_run += 1
-
-            elapsed = run_program(num_threads)
-            times.append(elapsed)
-
-            print(
-                f"Execução {repetition:2d}/{REPETITIONS} "
-                f"| Tempo: {elapsed:.4f} s "
-                f"| Progresso: {current_run}/{total_runs}"
-            )
-
-        average = sum(times) / len(times)
-
-        results[num_threads] = {
-            "times": times,
-            "average": average
-        }
-
-        print(f"Média: {average:.4f} s")
-        print()
-
-    # Tempo da execução com 1 thread
-    time_1_thread = results[1]["average"]
-
-    # Calcular speedup
-    for num_threads in results:
-
-        average = results[num_threads]["average"]
-
-        results[num_threads]["speedup"] = (
-            time_1_thread / average
-        )
-
-    # Mostrar resultados
-    print("\n================ RESULTADOS ================\n")
-
-    print(
-        f"{'Threads':>8} "
-        f"{'Média (s)':>12} "
-        f"{'Speedup':>12}"
+    benchmark.plot_speedup(
+        {"Pthreads": (thread_counts, speedups)},
+        thread_counts,
+        "Speedup do Mandelbrot com Pthreads",
+        PLOT_FILE,
+        show=not args.no_show,
     )
-
-    print("-" * 36)
-
-    for num_threads in results:
-
-        average = results[num_threads]["average"]
-        speedup = results[num_threads]["speedup"]
-
-        print(
-            f"{num_threads:>8} "
-            f"{average:>12.4f} "
-            f"{speedup:>12.4f}"
-        )
-
-    # Salvar CSV
-    with open("resultados_mandelbrot.csv", "w", newline="") as file:
-
-        writer = csv.writer(file)
-
-        writer.writerow([
-            "threads",
-            "tempo_medio",
-            "speedup"
-        ])
-
-        for num_threads in results:
-
-            writer.writerow([
-                num_threads,
-                results[num_threads]["average"],
-                results[num_threads]["speedup"]
-            ])
-
-    print("\nResultados salvos em:")
-    print("resultados_mandelbrot.csv")
-
-    # ============================
-    # Gráfico
-    # ============================
-
-    threads = list(results.keys())
-    speedups = [
-        results[t]["speedup"]
-        for t in threads
-    ]
-
-    plt.figure(figsize=(10, 6))
-
-    plt.plot(
-        threads,
-        speedups,
-        marker="o"
-    )
-
-    # Speedup ideal
-    plt.plot(
-        threads,
-        threads,
-        linestyle="--",
-        label="Speedup ideal"
-    )
-
-    plt.xlabel("Número de Threads")
-    plt.ylabel("Speedup")
-
-    plt.title(
-        "Speedup do Mandelbrot com Pthreads"
-    )
-
-    plt.xticks(threads)
-
-    plt.grid(True)
-
-    plt.legend()
-
-    plt.tight_layout()
-
-    plt.savefig(
-        "speedup_mandelbrot.png",
-        dpi=300
-    )
-
-    plt.show()
 
 
 if __name__ == "__main__":

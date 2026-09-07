@@ -1,94 +1,116 @@
-#include <complex>
+// Mandelbrot paralelizado com pthreads.
+//
+// Cada thread recebe uma faixa contígua de linhas da matriz. Como o custo por
+// linha varia bastante (linhas no centro do conjunto iteram até max_iter), a
+// divisão em blocos iguais é justamente o que o benchmark quer avaliar.
+//
+// Entrada (stdin): linhas, colunas, max_iter, n_threads
+// Saída: tempo do cálculo em stderr; a matriz em stdout apenas com --print
+
+#include "mandelbrot.hpp"
+
+#include <pthread.h>
+
+#include <chrono>
+#include <cstddef>
 #include <iostream>
+#include <string>
+#include <vector>
 
-using namespace std;
+namespace {
 
-struct thread_data {
-	int max_row;
-	int max_column;
-	int max_n;
-	int n_threads;
-	char **mat;
-	int ini_row;
-	int fin_row;
-	int t_id;
+// Faixa de linhas [first_row, last_row) atribuída a uma thread.
+struct ThreadTask {
+	Params params;
+	char *grid;
+	int first_row;
+	int last_row;
 };
 
-void *mandel_thread(void *a){
-	struct thread_data *data = (struct thread_data *)a;
-	//abre os dados 
-	int max_row = data->max_row;
-	int max_column = data->max_column;
-	int max_n = data->max_n;
-	int n = data->max_n;
+// Adapta render_rows à assinatura exigida por pthread_create.
+void *worker(void *arg) {
+	const ThreadTask *task = static_cast<const ThreadTask *>(arg);
 
-	//for(int r = 0; r < max_row; ++r){ //escalonemento
-	for(int r = data->ini_row; r < data->fin_row; ++r){
-		for(int c = 0; c < max_column; ++c){
-			//para cada celula da matriz
-			complex<float> z;
-			int n = 0;
-			while(abs(z) < 2 && ++n < max_n)
-				z = pow(z, 2) + decltype(z)(
-					(float)c * 2 / max_column - 1.5,
-					(float)r * 2 / max_row - 1
-				);
-			data->mat[r][c]=(n == max_n ? '#' : '.');
-		}
-	}
-	pthread_exit(NULL);
+	render_rows(task->params, task->grid, task->first_row, task->last_row);
+
+	return nullptr;
 }
 
-int main(){
-	int max_row, max_column, max_n, n_threads;
-	cin >> max_row;
-	cin >> max_column;
-	cin >> max_n;
-	cin >> n_threads;
+// Divide as linhas em n_threads faixas de tamanho equilibrado.
+std::vector<ThreadTask> split_rows(const Params &p, char *grid, int n_threads) {
+	std::vector<ThreadTask> tasks((std::size_t)n_threads);
 
-	char **mat = (char**)malloc(sizeof(char*)*max_row);
-	char *block = (char *)malloc(sizeof(char)*max_row*max_column);
-
-	for (int i=0; i<max_row;i++) {
-		mat[i]=&block[i * max_column];
-//		mat[i]=(char*)malloc(sizeof(char)*max_column);
+	for (int i = 0; i < n_threads; ++i) {
+		tasks[i].params = p;
+		tasks[i].grid = grid;
+		tasks[i].first_row = (int)((long long)i * p.rows / n_threads);
+		tasks[i].last_row = (int)((long long)(i + 1) * p.rows / n_threads);
 	}
-	// alimentar a memoria
-	// criar as threads
 
-	pthread_t threads[n_threads];
+	return tasks;
+}
 
-	struct thread_data data[n_threads];
+// Dispara uma thread por tarefa e espera todas terminarem.
+void run_parallel(std::vector<ThreadTask> &tasks) {
+	std::vector<pthread_t> threads(tasks.size());
 
-	for (int i = 0; i < n_threads; i++) {
+	std::size_t created = 0;
+	int status = 0;
 
-		data[i].max_row = max_row;
-		data[i].max_column = max_column;
-		data[i].max_n = max_n;
-		data[i].mat = mat;
-		data[i].ini_row = i * max_row / n_threads;
-		data[i].fin_row = (i + 1) * max_row / n_threads;
+	for (; created < tasks.size(); ++created) {
+		status = pthread_create(&threads[created], nullptr, worker, &tasks[created]);
 
-		pthread_create(
-			&threads[i],
-			NULL,
-			mandel_thread,
-			&data[i]
+		if (status != 0)
+			break;
+	}
+
+	// Junta o que foi criado antes de propagar o erro: as tarefas vivem na
+	// pilha de main e não podem ser destruídas com threads ainda rodando.
+	for (std::size_t i = 0; i < created; ++i)
+		pthread_join(threads[i], nullptr);
+
+	if (status != 0)
+		throw std::runtime_error(
+			"falha ao criar thread: " + std::string(std::strerror(status))
 		);
-	}
-
-	for (int i = 0; i < n_threads; i++) {
-		pthread_join(threads[i], NULL);	
-	}
-
-	//for(int r = 0; r < max_row; ++r){
-	//	for(int c = 0; c < max_column; ++c)
-	//		std::cout << mat[r][c];
-	//	cout << '\n';
-	//}	
-
-	free(block);
-	free(mat);
 }
 
+int read_thread_count(std::istream &in) {
+	int n_threads = 0;
 
+	if (!(in >> n_threads) || n_threads <= 0)
+		throw std::runtime_error(
+			"número de threads inválido: esperado um inteiro positivo"
+		);
+
+	return n_threads;
+}
+
+}  // namespace
+
+int main(int argc, char **argv) {
+	try {
+		const Params params = read_params(std::cin);
+		const int n_threads = read_thread_count(std::cin);
+
+		// Um único bloco contíguo: uma linha começa onde a anterior termina,
+		// o que preserva a localidade de cache entre linhas vizinhas.
+		std::vector<char> grid((std::size_t)params.rows * params.cols);
+
+		std::vector<ThreadTask> tasks = split_rows(params, grid.data(), n_threads);
+
+		const auto start = std::chrono::steady_clock::now();
+		run_parallel(tasks);
+		const auto end = std::chrono::steady_clock::now();
+
+		report_time(std::chrono::duration<double>(end - start).count());
+
+		if (wants_grid_output(argc, argv))
+			print_grid(params, grid.data(), std::cout);
+
+		return 0;
+	} catch (const std::exception &e) {
+		std::cerr << "erro: " << e.what() << '\n';
+		return 1;
+	}
+}
